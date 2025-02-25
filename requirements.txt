@@ -1,5 +1,5 @@
-numpy
-pandas
-scikit-learn
-biopython
-joblib
+numpy==1.23.5
+pandas==1.5.3
+scikit-learn==1.2.2
+biopython==1.81
+joblib==1.2.0

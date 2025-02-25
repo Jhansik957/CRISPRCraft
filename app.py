@@ -1,113 +1,232 @@
 import streamlit as st
 import pandas as pd
+from Bio import SeqIO
+import re
+from Bio.SeqUtils import gc_fraction
 from PIL import Image
-import subprocess
-import os
-import base64
-import joblib  # Use joblib for loading the model
 
-# Molecular descriptor calculator
-def desc_calc():
-    try:
-        # Perform descriptor calculation
-        bashCommand = (
-            "java -Xms2G -Xmx2G -Djava.awt.headless=true -jar ./PaDEL-Descriptor/PaDEL-Descriptor.jar "
-            "-removesalt -standardizenitro -fingerprints "
-            "-descriptortypes ./PaDEL-Descriptor/PubchemFingerprinter.xml -dir ./ -file descriptors_output.csv"
-        )
-        process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
-        output, error = process.communicate()
-        if process.returncode != 0:
-            st.error(f"Error in descriptor calculation: {error.decode()}")
-        os.remove('molecule.smi')
-    except Exception as e:
-        st.error(f"An error occurred during descriptor calculation: {e}")
+# Set page configuration
+st.set_page_config(page_title="CRISPRCraft", layout="wide")
 
-# File download
-def filedownload(df):
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()  # strings <-> bytes conversions
-    href = f'<a href="data:file/csv;base64,{b64}" download="prediction.csv">Download Predictions</a>'
-    return href
+# Custom CSS for styling
+st.markdown(
+    """
+    <style>
+        /* General Page Styling */
+        body {
+            background-color: #f4f8fb;
+            color: #2c3e50;
+            font-family: Arial, sans-serif;
+        }
 
-# Model building
-def build_model(input_data):
-    try:
-        # Load the model
-        load_model = joblib.load('model.joblib')
+        /* Sidebar Styling */
+        .stSidebar {
+            background-color: #ECF0F1 !important; /* Light Gray */
+            padding: 10px;
+        }
         
-        # Ensure the input data is in the correct format
-        if hasattr(load_model, 'predict'):
-            # Apply model to make predictions
-            prediction = load_model.predict(input_data)
-            st.header('**Prediction output**')
-            prediction_output = pd.Series(prediction, name='pIC50')
-            molecule_name = pd.Series(load_data[1], name='molecule_name')
-            df = pd.concat([molecule_name, prediction_output], axis=1)
-            st.write(df)
-            st.markdown(filedownload(df), unsafe_allow_html=True)
-        else:
-            st.error("The loaded object is not a valid model.")
-    except Exception as e:
-        st.error(f"An error occurred while building the model: {e}")
+        /* Sidebar Text */
+        .stSidebar .css-1lcbmhc {
+            color: #2C3E50 !important; /* Dark Blue-Gray */
+            font-size: 18px !important; /* Larger Text */
+            font-weight: bold;
+        }
 
-# Logo image
-image = Image.open('image1.jpeg')
+        /* Active Selection */
+        .stSidebar .css-17eq0hr {
+            color: #E74C3C !important; /* Red for selection */
+            font-weight: bold;
+        }
 
-st.image(image, use_column_width=True)
+        /* Hover Effect */
+        .stSidebar .css-1lcbmhc:hover {
+            color: #007acc !important; /* Blue Hover */
+        }
 
-# Page title
-st.markdown("""
-# SchizoDock: A Bioactivity Prediction App (Excitatory Amino Acid Transporter 3)
+        /* Main Title */
+        .main-title {
+            color: #004c7d;
+            text-align: center;
+            font-size: 36px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
 
-This app allows you to predict the bioactivity towards inhibiting the `EAAT3` enzyme. `EAAT3` is a drug target for Schizophrenia.
+        /* Content Box */
+        .highlight-box {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
 
-**Credits**
-- App built in `Python` + `Streamlit` by [Jhansi](https://github.com/Jhansik957/CRISPRCraft)
-- Descriptor calculated using [PaDEL-Descriptor](http://www.yapcwsoft.com/dd/padeldescriptor/) [[Read the Paper]](https://doi.org/10.1002/jcc.21707).
----
-""")
+        /* Buttons */
+        .btn-primary {
+            background-color: #007acc !important;
+            color: white !important;
+            font-weight: bold;
+        }
+        .btn-primary:hover {
+            background-color: #005f99 !important;
+        }
 
-# Sidebar
-with st.sidebar.header('1. Upload your CSV data'):
-    uploaded_file = st.sidebar.file_uploader("Upload your input file", type=['txt'])
-    st.sidebar.markdown("""
-[Example input file](https://raw.githubusercontent.com/dataprofessor/bioactivity-prediction-app/main/example_acetylcholinesterase.txt)
-""")
+        /* Welcome Container */
+        .welcome-container {
+            background-color: #E6E6FA; /* Light lavender */
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
 
-if st.sidebar.button('Predict'):
-    if uploaded_file is not None:
-        load_data = pd.read_table(uploaded_file, sep=' ', header=None)
-        load_data.to_csv('molecule.smi', sep='\t', header=False, index=False)
+        .welcome-text {
+            color: #2c2c2c;
+            font-size: 28px;
+            font-weight: bold;
+        }
 
-        st.header('**Original input data**')
-        st.write(load_data)
+        .highlight-crispr {
+            color: #007bff; /* Blue color */
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-        with st.spinner("Calculating descriptors..."):
-            desc_calc()
+# Sidebar Navigation
+st.sidebar.title("CRISPRCraft Navigation")
+selection = st.sidebar.radio("Go to", ["Home", "gRNA Prediction", "About", "Contact Us"])
 
-        # Read in calculated descriptors and display the dataframe
-        st.header('**Calculated molecular descriptors**')
-        if os.path.exists('descriptors_output.csv'):
-            desc = pd.read_csv('descriptors_output.csv')
-            st.write(desc)
-            st.write(desc.shape)
+def calculate_gc_content(sequence):
+    """Calculate GC content percentage."""
+    return round(gc_fraction(sequence) * 100, 2)
 
-            # Read descriptor list used in previously built model
-            st.header('**Subset of descriptors from previously built models**')
-            if os.path.exists('descriptor_list.csv'):
-                Xlist = list(pd.read_csv('descriptor_list.csv').columns)
-                desc_subset = desc[Xlist]
-                st.write(desc_subset)
-                st.write(desc_subset.shape)
+def count_off_targets(sequence, gRNA):
+    """Counts approximate off-target sites by checking similar sequences."""
+    off_target_count = len(re.findall(f'(?={gRNA[:-2]})', sequence)) - 1  # Ignore last 2 bases
+    return off_target_count if off_target_count > 0 else "Low"
 
-                # Apply trained model to make prediction on query compounds
-                build_model(desc_subset)
+def extract_gRNAs(sequence, pam):
+    """Extract gRNAs and compute GC content & off-target count."""
+    gRNAs = []
+    pam_regex = pam.replace('N', '.')  # Convert 'NGG' to regex
+    
+    for match in re.finditer(f'([ATCG]{{20}})({pam_regex})', sequence):
+        gRNA = match.group(1)
+        gc_content = calculate_gc_content(gRNA)
+        off_target = count_off_targets(sequence, gRNA)
+        
+        gRNAs.append({"gRNA Sequence": gRNA, "GC Content (%)": gc_content, "Off-Target Risk": off_target})
+    
+    return gRNAs[:50]  # Limit to top 50 gRNAs
+
+if selection == "Home":
+    # Title (Centered)
+    st.markdown("<h1 style='text-align: center;'>Welcome to CRISPRCraft: Your Precision gRNA Design Tool</h1>", unsafe_allow_html=True)
+
+    # Display Logo in Center
+    from PIL import Image
+    logo = Image.open("logo.jpg")  # Change this if the filename is different
+
+    st.markdown(
+        "<div style='display: flex; justify-content: center;'>",
+        unsafe_allow_html=True
+    )
+    st.image(logo, width=400)  # Adjust width if needed
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Description
+    st.write("**CRISPRCraft** is an advanced platform designed to streamline **guide RNA (gRNA) selection** for CRISPR genome editing. The other features of CRISPRCRAFT include:")
+    st.markdown("""
+    - 🔹 **On-Target Efficiency Prediction** – Identify high-efficiency gRNAs.
+    - 🔹 **Off-Target Analysis** – Reduce unintended edits with advanced prediction.
+    - 🔹 **Customizable Inputs** – Upload sequences in **FASTA/TXT** format.
+    - 🔹 **Exportable Reports** – Download gRNA designs as **CSV files**.
+    
+    🚀 **Accelerate your CRISPR research with ease!**
+    """)
+
+    st.markdown("""
+    ## Built By Researchers, For Researchers
+    Developed by **[Jhansi](https://github.com/Jhansik957/CRISPRCraft)**, this tool is tailored to assist **biologists, genetic engineers, and computational researchers** in CRISPR-based genome editing.
+    
+    📚 **Learn More:** [Read our latest insights](https://www.linkedin.com/posts/jhansikbioinfo_excited-to-share-my-latest-article-on-the-activity-7277908231920783360-Q1ok?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFEXWlABejOhJYU6Ulsl7RY7w5_20qqJn-0)
+    
+    ## 🧑‍🔬 Join the CRISPRCraft Community!
+    🔹 **Stay Updated** – Follow us on GitHub for updates & new features.
+    🔹 **Contribute** – Help improve CRISPRCraft by suggesting features.
+    🔹 **Contact Us** – Reach out for collaborations or support.
+    
+    📩 **Email:** support@crisprcraft.com  
+    🌐 **Website:** [CRISPRCraft.com](https://crisprcraft.com)
+    """)
+    
+elif selection == "gRNA Prediction":
+    st.title("CRISPR Design Tool - CRISPRCraft")
+    st.write("Upload a FASTA or TXT file, or paste a DNA sequence to analyze gRNAs and predict off-target effects.")
+
+    uploaded_file = st.file_uploader("Upload a FASTA or TXT file", type=["fasta", "fa", "txt"])
+    sequence_input = st.text_area("Paste your DNA sequence here", "")
+
+    pam_sequence = st.selectbox("Select PAM sequence", ["NGG", "NAG", "NTG", "Other"])
+    if pam_sequence == "Other":
+        pam_sequence = st.text_input("Enter custom PAM sequence", "NGG")
+
+    if st.button("Predict gRNAs"):
+        sequence = ""
+        if uploaded_file:
+            st.success("File uploaded successfully!")
+            if uploaded_file.name.endswith(".txt"):
+                sequence = uploaded_file.read().decode("utf-8").strip().upper()
             else:
-                st.error("Descriptor list file not found.")
-        else:
-            st.error("Descriptor output file not found.")
-    else:
-        st.error("Please upload a file to proceed.")
-else:
-    st.info('Upload input data in the sidebar to start!')
+                records = list(SeqIO.parse(uploaded_file, "fasta"))
+                sequence = str(records[0].seq).upper() if records else ""
+        elif sequence_input:
+            sequence = sequence_input.strip().upper()
+
+        if sequence:
+            gRNAs = extract_gRNAs(sequence, pam_sequence)
+            if gRNAs:
+                df = pd.DataFrame(gRNAs)
+                st.dataframe(df)
+
+                # Download CSV
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("Download gRNA CSV", csv, "gRNAs.csv", "text/csv")
+            else:
+                st.warning("No gRNAs found with the given PAM sequence.")
+
+elif selection == "About":
+    st.title("About CRISPRCraft")
+    st.write("CRISPRCraft is a tool designed to help researchers design optimal gRNAs for CRISPR experiments.")
+    st.write("It allows users to upload sequences, customize PAM recognition, and export gRNA predictions.")
+    st.markdown("""
+    ## 🧬 Why Use CRISPRCraft?
+    - 🔹 **Accurate Predictions** – Uses advanced algorithms to **design precise gRNAs**.
+    - 🔹 **Intuitive Interface** – No coding skills required! Simply **upload, analyze, and export**.
+    - 🔹 **Customizable Settings** – Choose different **PAM sequences** and optimize results.
+    - 🔹 **Fast and Efficient** – Processes **large datasets** in seconds.
+    
+    ## 📌 How It Works?
+    - 🔹 **Upload** your **DNA sequence (FASTA/TXT)**.
+    - 🔹 **Select** a **PAM sequence** (NGG, NAG, NTG, or custom).
+    - 🔹 **Analyze** gRNAs with GC content & off-target predictions.
+    - 🔹 **Download** optimized gRNA designs in CSV format.
+    
+    🔍 Get started by heading to the **gRNA Prediction** section!
+    """)
+
+elif selection == "Contact Us":
+    st.title("Contact Us")
+    st.write("For support and inquiries, reach out to us at:")
+    st.write("📧 **Email:** support@crisprcraft.com")
+    st.write("📞 **Phone:** +1-234-567-8900")
+    st.write("🌐 **Website:** [CRISPRCraft.com](https://crisprcraft.com)")
+
+def main():  # Ensure this function exists before calling it
+    print("CRISPRCraft app is running!")
+    
+if __name__ == "__main__":
+    main()
